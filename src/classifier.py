@@ -1,4 +1,4 @@
-# This project uses code from "NeuralNetworkFromScratch" (https://github.com/Bot-Academy/NeuralNetworkFromScratch) by Bot Academy.
+# This project uses some code from "NeuralNetworkFromScratch" (https://github.com/Bot-Academy/NeuralNetworkFromScratch) by Bot Academy.
 import pathlib
 import tkinter as tk
 import numpy as np
