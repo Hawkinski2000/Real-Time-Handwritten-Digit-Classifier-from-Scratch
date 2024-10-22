@@ -223,7 +223,7 @@ class Classifier:
         hidden3_pre = self.hidden3_bias + self.hidden2_hidden3 @ hidden2
         hidden3 = 1 / (1 + np.exp(-hidden3_pre))
 
-        # Forward propagation hidden3 -> output
+        # Forward propagation: hidden3 -> output
         output_pre = self.output_bias + self.hidden3_output @ hidden3
         exp_values = np.exp(output_pre - np.max(output_pre))
         output = exp_values / np.sum(exp_values)
