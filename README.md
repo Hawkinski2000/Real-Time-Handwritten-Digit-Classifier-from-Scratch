@@ -8,3 +8,5 @@ An interactive, real-time MNIST digit classifier written from scratch. No Tensor
 ![App Screenshot](images/3.PNG)
 ![App Screenshot](images/5.PNG)
 ![App Screenshot](images/8.PNG)
+
+# This project uses code from "NeuralNetworkFromScratch" (https://github.com/Bot-Academy/NeuralNetworkFromScratch) by Bot Academy.
