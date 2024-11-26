@@ -59,8 +59,8 @@ class Canvas:
             self.canvas.create_rectangle(
                 x * self.scale_factor,
                 y * self.scale_factor,
-                (x + 1) * self.scale_factor,
-                (y + 1) * self.scale_factor,
+                (x + 2) * self.scale_factor,
+                (y + 2) * self.scale_factor,
                 fill=self.color,
                 outline=self.color
             )
@@ -97,11 +97,11 @@ class Classifier:
             self.train()
             # Only uncomment the next line if you want to save new weights.
             # The saved weights were trained for 1000 epochs.
-            #self.save_weights()
+            self.save_weights()
 
     def load_data(self):            
         current_dir = pathlib.Path(__file__).parent
-        with np.load(current_dir / "mnist.npz") as f:
+        with np.load(current_dir.parent / "data" / "mnist.npz") as f:
             self.images, self.labels = f["x_train"], f["y_train"]
         self.images = self.images.astype("float32") / 255
         self.images = np.reshape(self.images,
@@ -110,13 +110,19 @@ class Classifier:
         self.labels = np.eye(10)[self.labels]
 
     def initialize_weights(self):
-        self.input_hidden = np.random.uniform(-0.5, 0.5, (20, 784))
-        self.hidden_hidden2 = np.random.uniform(-0.5, 0.5, (20, 20))
-        self.hidden2_hidden3 = np.random.uniform(-0.5, 0.5, (20, 20))
-        self.hidden3_output = np.random.uniform(-0.5, 0.5, (10, 20))
-        self.hidden_bias = np.zeros((20, 1))
-        self.hidden2_bias = np.zeros((20, 1))
-        self.hidden3_bias = np.zeros((20, 1))
+        # self.input_hidden = np.random.uniform(-0.5, 0.5, (128, 784))
+        # self.hidden_hidden2 = np.random.uniform(-0.5, 0.5, (64, 128))
+        # self.hidden2_hidden3 = np.random.uniform(-0.5, 0.5, (32, 64))
+        # self.hidden3_output = np.random.uniform(-0.5, 0.5, (10, 32))
+        # He initialization for layers using ReLU activation
+        self.input_hidden = np.random.randn(128, 784) * np.sqrt(2. / 784)
+        self.hidden_hidden2 = np.random.randn(64, 128) * np.sqrt(2. / 128)
+        self.hidden2_hidden3 = np.random.randn(32, 64) * np.sqrt(2. / 64)
+        self.hidden3_output = np.random.randn(10, 32) * np.sqrt(2. / 32)
+
+        self.hidden_bias = np.zeros((128, 1))
+        self.hidden2_bias = np.zeros((64, 1))
+        self.hidden3_bias = np.zeros((32, 1))
         self.output_bias = np.zeros((10, 1))
 
     def load_weights(self):
@@ -148,7 +154,7 @@ class Classifier:
 
     def train(self):
         epochs = 20
-        batch_size = 128
+        batch_size = 64
 
         for epoch in range(epochs):
             num_correct = 0
