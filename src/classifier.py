@@ -193,7 +193,7 @@ class Classifier:
         return layer_output * mask / (1 - dropout_rate)
 
     def train(self):
-        epochs = 20
+        epochs = 1000
         batch_size = 64
         dropout_rate = 0.3
         self.training = True
