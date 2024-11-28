@@ -1,7 +1,8 @@
 # This project uses some code from "NeuralNetworkFromScratch" (https://github.com/Bot-Academy/NeuralNetworkFromScratch) by Bot Academy.
 import pathlib
 import tkinter as tk
-import numpy as np
+# import numpy as np
+import cupy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -87,7 +88,6 @@ class Canvas:
 
 class Classifier:
     def __init__(self, use_pretrained_weights=False):
-        self.learn_rate = 0.01
 
         if use_pretrained_weights:
             self.load_weights()
@@ -97,7 +97,7 @@ class Classifier:
             self.train()
             # Only uncomment the next line if you want to save new weights.
             # The saved weights were trained for 1000 epochs.
-            self.save_weights()
+            # self.save_weights()
 
     def load_data(self):            
         current_dir = pathlib.Path(__file__).parent
@@ -114,16 +114,25 @@ class Classifier:
         # self.hidden_hidden2 = np.random.uniform(-0.5, 0.5, (64, 128))
         # self.hidden2_hidden3 = np.random.uniform(-0.5, 0.5, (32, 64))
         # self.hidden3_output = np.random.uniform(-0.5, 0.5, (10, 32))
-        # He initialization for layers using ReLU activation
-        self.input_hidden = np.random.randn(128, 784) * np.sqrt(2. / 784)
-        self.hidden_hidden2 = np.random.randn(64, 128) * np.sqrt(2. / 128)
-        self.hidden2_hidden3 = np.random.randn(32, 64) * np.sqrt(2. / 64)
-        self.hidden3_output = np.random.randn(10, 32) * np.sqrt(2. / 32)
 
-        self.hidden_bias = np.zeros((128, 1))
-        self.hidden2_bias = np.zeros((64, 1))
-        self.hidden3_bias = np.zeros((32, 1))
+        # He initialization for layers using ReLU activation
+        self.input_hidden = np.random.randn(256, 784) * np.sqrt(2. / 784)
+        self.hidden_hidden2 = np.random.randn(128, 256) * np.sqrt(2. / 256)
+        self.hidden2_hidden3 = np.random.randn(64, 128) * np.sqrt(2. / 128)
+        self.hidden3_output = np.random.randn(10, 64) * np.sqrt(2. / 64)
+
+        self.hidden_bias = np.zeros((256, 1))
+        self.hidden2_bias = np.zeros((128, 1))
+        self.hidden3_bias = np.zeros((64, 1))
         self.output_bias = np.zeros((10, 1))
+
+        # Batch normalization parameters
+        self.gamma_hidden = np.ones((256, 1))
+        self.beta_hidden = np.zeros((256, 1))
+        self.gamma_hidden2 = np.ones((128, 1))
+        self.beta_hidden2 = np.zeros((128, 1))
+        self.gamma_hidden3 = np.ones((64, 1))
+        self.beta_hidden3 = np.zeros((64, 1))
 
     def load_weights(self):
         current_dir = pathlib.Path(__file__).parent
@@ -152,9 +161,43 @@ class Classifier:
                  output_bias=self.output_bias
         )
 
+    def batch_norm_forward(self, x, gamma, beta):
+            mean = np.mean(x, axis=1, keepdims=True)
+            variance = np.var(x, axis=1, keepdims=True)
+            x_normalized = (x - mean) / np.sqrt(variance + 1e-8)
+            return gamma * x_normalized + beta
+        
+    def batch_norm_backward(self, dout, x, gamma):
+        mean = np.mean(x, axis=1, keepdims=True)
+        variance = np.var(x, axis=1, keepdims=True)
+        x_normalized = (x - mean) / np.sqrt(variance + 1e-8)
+        # Gradients for scale and shift
+        dgamma = np.sum(dout * x_normalized, axis=1, keepdims=True)
+        dbeta = np.sum(dout, axis=1, keepdims=True)
+        # Gradients for input
+        N, D = x.shape
+        dx_normalized = dout * gamma
+        dvariance = np.sum(dx_normalized * (x - mean) * -0.5 * (variance + 1e-8) ** -1.5, axis=1, keepdims=True)
+        dmean = np.sum(dx_normalized * -1 / np.sqrt(variance + 1e-8), axis=1, keepdims=True) + \
+                dvariance * np.sum(-2 * (x - mean), axis=1, keepdims=True) / N
+        dx = dx_normalized / np.sqrt(variance + 1e-8) + dvariance * 2 * (x - mean) / N + dmean / N
+        return dx, dgamma, dbeta
+    
+    def apply_dropout(self, layer_output, dropout_rate):
+        """Apply dropout to the given layer during training."""
+        if dropout_rate == 0 or not self.training:
+            return layer_output
+        # Create a binary mask for dropout
+        mask = np.random.rand(*layer_output.shape) > dropout_rate
+        # Scale the activations to maintain the same output magnitude
+        return layer_output * mask / (1 - dropout_rate)
+
     def train(self):
         epochs = 20
         batch_size = 64
+        dropout_rate = 0.3
+        self.training = True
+        self.learn_rate = 0.001
 
         for epoch in range(epochs):
             num_correct = 0
@@ -169,15 +212,24 @@ class Classifier:
 
                 # Forward propagation: input -> hidden
                 hidden_pre = self.hidden_bias + self.input_hidden @ batch_images
-                hidden = 1 / (1 + np.exp(-hidden_pre)) # Sigmoid
+                # hidden = 1 / (1 + np.exp(-hidden_pre)) # Sigmoid
+                # hidden = np.maximum(0, self.batch_norm_forward(hidden_pre, self.gamma_hidden, self.beta_hidden)) # ReLU and batch norm
+                hidden = np.maximum(0, hidden_pre)
+                hidden = self.apply_dropout(hidden, dropout_rate=dropout_rate)  # Apply dropout
 
                 # Forward propagation: hidden -> hidden2
                 hidden2_pre = self.hidden2_bias + self.hidden_hidden2 @ hidden
-                hidden2 = 1 / (1 + np.exp(-hidden2_pre)) # Sigmoid
+                # hidden2 = 1 / (1 + np.exp(-hidden2_pre)) # Sigmoid
+                # hidden2 = np.maximum(0, self.batch_norm_forward(hidden2_pre, self.gamma_hidden2, self.beta_hidden2)) # ReLU and batch norm
+                hidden2 = np.maximum(0, hidden2_pre)
+                hidden2 = self.apply_dropout(hidden2, dropout_rate=dropout_rate)  # Apply dropout
 
                 # Forward propagation: hidden2 -> hidden3
                 hidden3_pre = self.hidden3_bias + self.hidden2_hidden3 @ hidden2
-                hidden3 = 1 / (1 + np.exp(-hidden3_pre)) # Sigmoid
+                # hidden3 = 1 / (1 + np.exp(-hidden3_pre)) # Sigmoid
+                # hidden3 = np.maximum(0, self.batch_norm_forward(hidden3_pre, self.gamma_hidden3, self.beta_hidden3)) # ReLU and batch norm
+                hidden3 = np.maximum(0, hidden3_pre)
+                hidden3 = self.apply_dropout(hidden3, dropout_rate=dropout_rate)  # Apply dropout
 
                 # Forward propagation: hidden3 -> output
                 output_pre = self.output_bias + self.hidden3_output @ hidden3
@@ -194,21 +246,47 @@ class Classifier:
                 delta_o = output - batch_labels
                 self.hidden3_output -= self.learn_rate * delta_o @ hidden3.T
                 self.output_bias -= self.learn_rate * np.sum(delta_o, axis=1, keepdims=True)
+                # self.hidden3_output -= self.learn_rate * np.clip(delta_o @ hidden3.T, -1e10, 1e10)
+                # self.output_bias -= self.learn_rate * np.clip(np.sum(delta_o, axis=1, keepdims=True), -1e10, 1e10)
 
                 # Backpropagation: hidden2 <- hidden3 
-                delta_h3 = (self.hidden3_output.T @ delta_o) * (hidden3 * (1 - hidden3))
+                # delta_h3 = (self.hidden3_output.T @ delta_o) * (hidden3 * (1 - hidden3))
+                # self.hidden2_hidden3 -= self.learn_rate * delta_h3 @ hidden2.T
+                # self.hidden3_bias -= self.learn_rate * np.sum(delta_h3, axis=1, keepdims=True)
+                delta_h3 = (self.hidden3_output.T @ delta_o) * (hidden3 > 0)
+                # delta_h3, dgamma_h3, dbeta_h3 = self.batch_norm_backward(delta_h3, hidden3_pre, self.gamma_hidden3) # Batch normalization
+                # self.gamma_hidden3 -= self.learn_rate * dgamma_h3
+                # self.beta_hidden3 -= self.learn_rate * dbeta_h3
                 self.hidden2_hidden3 -= self.learn_rate * delta_h3 @ hidden2.T
                 self.hidden3_bias -= self.learn_rate * np.sum(delta_h3, axis=1, keepdims=True)
+                # self.hidden2_hidden3 -= self.learn_rate * np.clip(delta_h3 @ hidden2.T, -1e10, 1e10)
+                # self.hidden3_bias -= self.learn_rate * np.clip(np.sum(delta_h3, axis=1, keepdims=True), -1e10, 1e10)
 
                 # Backpropagation: hidden <- hidden2 
-                delta_h2 = (self.hidden2_hidden3.T @ delta_h3) * (hidden2 * (1 - hidden2))
+                # delta_h2 = (self.hidden2_hidden3.T @ delta_h3) * (hidden2 * (1 - hidden2))
+                # self.hidden_hidden2 -= self.learn_rate * delta_h2 @ hidden.T
+                # self.hidden2_bias -= self.learn_rate * np.sum(delta_h2, axis=1, keepdims=True)
+                delta_h2 = (self.hidden2_hidden3.T @ delta_h3) * (hidden2 > 0)
+                # delta_h2, dgamma_h2, dbeta_h2 = self.batch_norm_backward(delta_h2, hidden2_pre, self.gamma_hidden2) # Batch normalization
+                # self.gamma_hidden2 -= self.learn_rate * dgamma_h2
+                # self.beta_hidden2 -= self.learn_rate * dbeta_h2
                 self.hidden_hidden2 -= self.learn_rate * delta_h2 @ hidden.T
                 self.hidden2_bias -= self.learn_rate * np.sum(delta_h2, axis=1, keepdims=True)
+                # self.hidden_hidden2 -= self.learn_rate * np.clip(delta_h2 @ hidden.T, -1e10, 1e10)
+                # self.hidden2_bias -= self.learn_rate * np.clip(np.sum(delta_h2, axis=1, keepdims=True), -1e10, 1e10)
 
                 # Backpropagation: input <- hidden 
-                delta_h = (self.hidden_hidden2.T @ delta_h2) * (hidden * (1 - hidden))
+                # delta_h = (self.hidden_hidden2.T @ delta_h2) * (hidden * (1 - hidden))
+                # self.input_hidden -= self.learn_rate * delta_h @ batch_images.T
+                # self.hidden_bias -= self.learn_rate * np.sum(delta_h, axis=1, keepdims=True)
+                delta_h = (self.hidden_hidden2.T @ delta_h2) * (hidden > 0)
+                # delta_h, dgamma_h, dbeta_h = self.batch_norm_backward(delta_h, hidden_pre, self.gamma_hidden) # Batch normalization
+                # self.gamma_hidden -= self.learn_rate * dgamma_h
+                # self.beta_hidden -= self.learn_rate * dbeta_h
                 self.input_hidden -= self.learn_rate * delta_h @ batch_images.T
                 self.hidden_bias -= self.learn_rate * np.sum(delta_h, axis=1, keepdims=True)
+                # self.input_hidden -= self.learn_rate * np.clip(delta_h @ batch_images.T, -1e10, 1e10)
+                # self.hidden_bias -= self.learn_rate * np.clip(np.sum(delta_h, axis=1, keepdims=True), -1e10, 1e10)
 
             print(
                 f"Epoch: {epoch + 1}, "
@@ -217,17 +295,25 @@ class Classifier:
             )
 
     def classify(self, drawn_image):
+        self.training = False
+
         # Forward propagation: input -> hidden
         hidden_pre = self.hidden_bias + self.input_hidden @ drawn_image.T
-        hidden = 1 / (1 + np.exp(-hidden_pre))
+        # hidden = 1 / (1 + np.exp(-hidden_pre)) # Sigmoid
+        # hidden = np.maximum(0, self.batch_norm_forward(hidden_pre, self.gamma_hidden, self.beta_hidden)) # ReLU and batch norm
+        hidden = np.maximum(0, hidden_pre)
 
         # Forward propagation: hidden -> hidden2
         hidden2_pre = self.hidden2_bias + self.hidden_hidden2 @ hidden
-        hidden2 = 1 / (1 + np.exp(-hidden2_pre))
+        # hidden2 = 1 / (1 + np.exp(-hidden2_pre)) # Sigmoid
+        # hidden2 = np.maximum(0, self.batch_norm_forward(hidden2_pre, self.gamma_hidden2, self.beta_hidden2)) # ReLU and batch norm
+        hidden2 = np.maximum(0, hidden2_pre)
 
         # Forward propagation: hidden2 -> hidden3
         hidden3_pre = self.hidden3_bias + self.hidden2_hidden3 @ hidden2
-        hidden3 = 1 / (1 + np.exp(-hidden3_pre))
+        # hidden3 = 1 / (1 + np.exp(-hidden3_pre)) # Sigmoid
+        # hidden3 = np.maximum(0, self.batch_norm_forward(hidden3_pre, self.gamma_hidden3, self.beta_hidden3)) # ReLU and batch norm
+        hidden3 = np.maximum(0, hidden3_pre)
 
         # Forward propagation: hidden3 -> output
         output_pre = self.output_bias + self.hidden3_output @ hidden3
